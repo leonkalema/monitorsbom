@@ -1,0 +1,48 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.4",
+  "version": 1,
+  "components": [
+    {
+      "type": "library",
+      "name": "mbedtls",
+      "version": "2.28.1",
+      "purl": "pkg:generic/mbedtls@2.28.1"
+    },
+    {
+      "type": "library",
+      "name": "shibboleth-sp",
+      "version": "3.4.1",
+      "purl": "pkg:generic/shibboleth-sp@3.4.1",
+      "description": "Shibboleth Service Provider - SAML-based single sign-on authentication"
+    },
+    {
+      "type": "operating-system",
+      "name": "safertos",
+      "version": "5.11",
+      "purl": "pkg:generic/safertos@5.11",
+      "description": "SafeRTOS - Safety certified real-time operating system"
+    },
+    {
+      "type": "hardware",
+      "name": "stm32f745zet6",
+      "version": "1.0",
+      "purl": "pkg:hardware/stmicroelectronics/stm32f745zet6@1.0",
+      "description": "STM32F745ZET6 - ARM Cortex-M7 microcontroller"
+    },
+    {
+      "type": "hardware",
+      "name": "stm32f745vet6",
+      "version": "1.0",
+      "purl": "pkg:hardware/stmicroelectronics/stm32f745vet6@1.0",
+      "description": "STM32F745VET6 - ARM Cortex-M7 microcontroller"
+    },
+    {
+      "type": "hardware",
+      "name": "stm32f745zgt7",
+      "version": "1.0",
+      "purl": "pkg:hardware/stmicroelectronics/stm32f745zgt7@1.0",
+      "description": "STM32F745ZGT7 - ARM Cortex-M7 microcontroller"
+    }
+  ]
+}
