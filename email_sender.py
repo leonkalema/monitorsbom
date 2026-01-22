@@ -18,6 +18,12 @@ import os
 from config import EMAIL_CONFIG
 from email_content_builder import EmailContentBuilder
 
+try:
+    from pdf_report_generator import PDFReportGenerator
+    PDF_AVAILABLE = True
+except ImportError:
+    PDF_AVAILABLE = False
+
 # Email service imports (optional)
 try:
     from mailersend import MailerSendClient
@@ -97,16 +103,48 @@ class EmailSender:
     def _send_via_smtp(self, results: Dict, recipient: str) -> bool:
         """Send email via SMTP"""
         try:
+            # Parse recipients
+            recipients = self._parse_recipients(recipient)
+            if not recipients:
+                self.logger.error("No valid recipients found")
+                return False
+            
             # Create message
-            msg = MIMEMultipart()
+            msg = MIMEMultipart('mixed')
             msg['From'] = self.config['from_email']
-            msg['To'] = recipient
+            msg['To'] = ', '.join(recipients)
             msg['Subject'] = self._create_subject(results)
+            
+            # Create alternative part for text/html
+            alt_part = MIMEMultipart('alternative')
             
             # Create email body
             builder = EmailContentBuilder(results)
-            msg.attach(MIMEText(builder.create_text_body(), 'plain'))
-            msg.attach(MIMEText(builder.create_html_body(), 'html'))
+            alt_part.attach(MIMEText(builder.create_text_body(), 'plain'))
+            alt_part.attach(MIMEText(builder.create_html_body(), 'html'))
+            
+            msg.attach(alt_part)
+            
+            # Attach JSON report
+            output_file = results.get('output_file', '/tmp/combined-vuln-scan.json')
+            if os.path.exists(output_file):
+                with open(output_file, 'rb') as f:
+                    json_attachment = MIMEApplication(f.read(), _subtype='json')
+                    json_attachment.add_header(
+                        'Content-Disposition', 'attachment',
+                        filename='vulnerability-report.json'
+                    )
+                    msg.attach(json_attachment)
+            
+            # Attach PDF report
+            pdf_bytes = self._generate_pdf_report(results)
+            if pdf_bytes:
+                pdf_attachment = MIMEApplication(pdf_bytes, _subtype='pdf')
+                pdf_attachment.add_header(
+                    'Content-Disposition', 'attachment',
+                    filename='vulnerability-triage-worksheet.pdf'
+                )
+                msg.attach(pdf_attachment)
             
             # Send via SMTP
             with smtplib.SMTP(self.config['smtp_server'], self.config['smtp_port']) as server:
@@ -116,13 +154,40 @@ class EmailSender:
                 server.login(self.config['smtp_username'], self.config['smtp_password'])
                 server.send_message(msg)
             
-            self.logger.info(f"📧 SMTP email sent successfully to {recipient}")
+            self.logger.info(f"📧 SMTP email sent successfully to {recipients}")
             return True
             
         except Exception as e:
             self.logger.error(f"SMTP email failed: {e}")
             return False
     
+    def _parse_recipients(self, recipient: str) -> List[str]:
+        """Parse recipient string into list of valid email addresses"""
+        if not recipient:
+            return []
+        
+        # Split by comma and clean up
+        recipients = [r.strip() for r in recipient.split(',')]
+        # Filter out empty strings
+        return [r for r in recipients if r and '@' in r]
+
+    def _generate_pdf_report(self, results: Dict) -> bytes:
+        """Generate PDF report with triage checklists"""
+        if not PDF_AVAILABLE:
+            self.logger.warning("PDF generation not available (reportlab not installed)")
+            return None
+        
+        try:
+            generator = PDFReportGenerator(results)
+            if generator.is_available():
+                pdf_bytes = generator.generate_pdf()
+                self.logger.info(f"📄 PDF report generated ({len(pdf_bytes)} bytes)")
+                return pdf_bytes
+        except Exception as e:
+            self.logger.error(f"PDF generation failed: {e}")
+        
+        return None
+
     def _send_via_resend(self, results: Dict, recipient: str) -> bool:
         """Send email via Resend API"""
         try:
@@ -133,6 +198,12 @@ class EmailSender:
             # Set API key
             resend.api_key = self.config['resend_api_key']
             
+            # Parse recipients properly
+            recipients = self._parse_recipients(recipient)
+            if not recipients:
+                self.logger.error("No valid recipients found")
+                return False
+            
             # Create email parameters
             builder = EmailContentBuilder(results)
             subject = builder.create_subject()
@@ -140,10 +211,13 @@ class EmailSender:
             
             params = {
                 "from": f"SBOM Security Scanner <{self.config['from_email']}>",
-                "to": [recipient],
+                "to": recipients,  # Now a proper list of individual emails
                 "subject": subject,
                 "html": html_content
             }
+            
+            # Build attachments list
+            attachments = []
             
             # Attach JSON report if available
             output_file = results.get('output_file', '/tmp/combined-vuln-scan.json')
@@ -151,16 +225,27 @@ class EmailSender:
                 with open(output_file, 'r') as f:
                     json_content = f.read()
                 
-                params["attachments"] = [{
+                attachments.append({
                     "filename": "vulnerability-report.json",
                     "content": base64.b64encode(json_content.encode()).decode()
-                }]
+                })
+            
+            # Attach PDF report with triage checklists
+            pdf_bytes = self._generate_pdf_report(results)
+            if pdf_bytes:
+                attachments.append({
+                    "filename": "vulnerability-triage-worksheet.pdf",
+                    "content": base64.b64encode(pdf_bytes).decode()
+                })
+            
+            if attachments:
+                params["attachments"] = attachments
             
             # Send email
             response = resend.Emails.send(params)
             
             if response and response.get('id'):
-                self.logger.info(f"📧 Resend email sent successfully to {recipient} (ID: {response['id']})")
+                self.logger.info(f"📧 Resend email sent successfully to {recipients} (ID: {response['id']})")
                 return True
             else:
                 self.logger.error("Resend API returned empty response")

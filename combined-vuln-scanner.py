@@ -769,6 +769,17 @@ def main():
     
     print(f"\n💾 Detailed results saved to: {output_file}")
     
+    # Generate and save PDF report with triage checklists
+    try:
+        from pdf_report_generator import PDFReportGenerator
+        pdf_generator = PDFReportGenerator(results)
+        if pdf_generator.is_available():
+            pdf_path = output_file.replace('.json', '-triage.pdf')
+            pdf_generator.generate_pdf(pdf_path)
+            print(f"📄 PDF triage worksheet saved to: {pdf_path}")
+    except Exception as e:
+        print(f"⚠️  PDF generation skipped: {e}")
+    
     # Always send email with scan results
     if scanner.config['scanner']['email_on_vulnerabilities']:
         success = scanner.email_sender.send_vulnerability_alert(results)

@@ -1,11 +1,27 @@
 #!/usr/bin/env python3
 
 from datetime import datetime
-from typing import Dict, List, Set
+from typing import Dict, List, Set, Optional
+
+try:
+    from triage_checklist_generator import TriageChecklistGenerator
+    CHECKLIST_GENERATOR_AVAILABLE = True
+except ImportError:
+    CHECKLIST_GENERATOR_AVAILABLE = False
+
 
 class EmailContentBuilder:
     def __init__(self, results: Dict):
         self.results = results
+        self.checklist_data: Optional[Dict] = None
+        
+        # Generate dynamic checklist based on actual SBOM
+        if CHECKLIST_GENERATOR_AVAILABLE:
+            try:
+                generator = TriageChecklistGenerator(results)
+                self.checklist_data = generator.generate_full_checklist()
+            except Exception:
+                pass
 
     def create_subject(self) -> str:
         unique_vulns = self.results.get("summary", {}).get(
@@ -84,8 +100,19 @@ class EmailContentBuilder:
                 "- Check detailed JSON report for complete information",
                 "- Consider implementing additional security controls",
                 "",
+            ]
+        )
+        
+        # Add triage checklists
+        lines.extend(self._create_config_checklist_text())
+        lines.extend(self._create_interface_checklist_text())
+        
+        lines.extend(
+            [
+                "",
                 "DETAILED REPORT:",
                 f"- JSON Report: {self.results.get('output_file', '/tmp/combined-vuln-scan.json')}",
+                "- PDF Report: Attached (if available)",
                 "- Run scanner again after applying patches",
                 "",
                 "This is an automated security alert from your SBOM vulnerability scanner.",
@@ -93,6 +120,82 @@ class EmailContentBuilder:
             ]
         )
         return "\n".join(lines)
+
+    def _create_config_checklist_text(self) -> List[str]:
+        """Create dynamic config checklist for text email based on actual SBOM"""
+        lines = [
+            "",
+            "=" * 50,
+            "TRIAGE CHECKLIST: Component Configuration",
+            "=" * 50,
+            "Questions generated based on your SBOM components:",
+            "",
+        ]
+        
+        if self.checklist_data:
+            config_items = self.checklist_data.get('config_checklist', [])
+            
+            # Group by component
+            by_component: Dict[str, List] = {}
+            for item in config_items:
+                comp = item['component']
+                if comp not in by_component:
+                    by_component[comp] = []
+                by_component[comp].append(item)
+            
+            for comp_name, items in by_component.items():
+                lines.append(f"--- {comp_name.upper()} ---")
+                lines.append("")
+                for item in items:
+                    cves = ', '.join(item['affects_cves'][:3])
+                    lines.append(f"☐ {item['config_option']}")
+                    lines.append(f"   {item['description']}")
+                    lines.append(f"   Affects: {cves}")
+                    lines.append(f"   Your Value: _______________")
+                    lines.append("")
+        else:
+            lines.append("(Dynamic checklist not available - see PDF attachment)")
+            lines.append("")
+        
+        return lines
+
+    def _create_interface_checklist_text(self) -> List[str]:
+        """Create dynamic interface checklist for text email"""
+        lines = [
+            "",
+            "=" * 50,
+            "TRIAGE CHECKLIST: System Interfaces",
+            "=" * 50,
+        ]
+        
+        if self.checklist_data:
+            comp_types = self.checklist_data.get('component_types', [])
+            lines.append(f"Relevant to component types: {', '.join(comp_types)}")
+            lines.append("")
+            
+            interface_items = self.checklist_data.get('interface_checklist', [])
+            
+            # Group by category
+            by_category: Dict[str, List] = {}
+            for item in interface_items:
+                cat = item['category']
+                if cat not in by_category:
+                    by_category[cat] = []
+                by_category[cat].append(item)
+            
+            for category, items in by_category.items():
+                lines.append(f"--- {category.upper()} ---")
+                for item in items:
+                    lines.append(f"☐ {item['interface']} ({item['description']})")
+                    lines.append(f"   Present: YES / NO")
+                    lines.append(f"   External Access: YES / NO")
+                    lines.append(f"   Auth Required: YES / NO / N/A")
+                    lines.append("")
+        else:
+            lines.append("(Dynamic checklist not available - see PDF attachment)")
+            lines.append("")
+        
+        return lines
 
     def create_html_body(self) -> str:
         unique_vulns = self.results.get("summary", {}).get(
@@ -176,13 +279,107 @@ class EmailContentBuilder:
                     "<p><strong>📎 Attached:</strong> Full JSON report with scan details</p>",
                 ]
             )
+        # Add triage checklists
+        lines.extend(self._create_config_checklist_html())
+        lines.extend(self._create_interface_checklist_html())
+        
         lines.extend(
             [
                 f"<hr><p><em>Generated at: {datetime.now().isoformat()}</em></p>",
+                "<p><strong>📎 Attachments:</strong> JSON Report, PDF Triage Worksheet</p>",
                 "</body></html>",
             ]
         )
         return "".join(lines)
+
+    def _create_config_checklist_html(self) -> List[str]:
+        """Create dynamic config checklist for HTML email based on actual SBOM"""
+        lines = [
+            "<h3 style='color: #4a90d9; margin-top: 30px;'>📋 TRIAGE CHECKLIST: Component Configuration</h3>",
+            "<p>Questions generated based on your SBOM components:</p>",
+        ]
+        
+        if self.checklist_data:
+            config_items = self.checklist_data.get('config_checklist', [])
+            
+            # Group by component
+            by_component: Dict[str, List] = {}
+            for item in config_items:
+                comp = item['component']
+                if comp not in by_component:
+                    by_component[comp] = []
+                by_component[comp].append(item)
+            
+            for comp_name, items in by_component.items():
+                lines.append(f"<h4 style='color: #333; margin-top: 15px;'>{comp_name.upper()}</h4>")
+                lines.append("<table border='1' style='border-collapse: collapse; width: 100%; margin-bottom: 10px;'>")
+                lines.append("<tr style='background-color: #4a90d9; color: white;'>")
+                lines.append("<th style='padding: 8px;'>Config Option</th>")
+                lines.append("<th style='padding: 8px;'>Your Value</th>")
+                lines.append("<th style='padding: 8px;'>Affects CVEs</th>")
+                lines.append("</tr>")
+                
+                for i, item in enumerate(items):
+                    bg = '#f0f7ff' if i % 2 else 'white'
+                    cves = ', '.join(item['affects_cves'][:3])
+                    if len(item['affects_cves']) > 3:
+                        cves += '...'
+                    lines.append(f"<tr style='background-color: {bg};'>")
+                    lines.append(f"<td style='padding: 8px;'><strong>☐ {item['config_option']}</strong><br><small>{item['description']}</small></td>")
+                    lines.append(f"<td style='padding: 8px; text-align: center;'>___________</td>")
+                    lines.append(f"<td style='padding: 8px;'><code>{cves}</code></td>")
+                    lines.append("</tr>")
+                
+                lines.append("</table>")
+        else:
+            lines.append("<p><em>Dynamic checklist not available - see PDF attachment for full triage worksheet.</em></p>")
+        
+        return lines
+
+    def _create_interface_checklist_html(self) -> List[str]:
+        """Create dynamic interface checklist for HTML email"""
+        lines = [
+            "<h3 style='color: #5cb85c; margin-top: 30px;'>🔌 TRIAGE CHECKLIST: System Interfaces</h3>",
+        ]
+        
+        if self.checklist_data:
+            comp_types = self.checklist_data.get('component_types', [])
+            lines.append(f"<p>Interfaces relevant to your component types: <strong>{', '.join(comp_types)}</strong></p>")
+            
+            interface_items = self.checklist_data.get('interface_checklist', [])
+            
+            # Group by category
+            by_category: Dict[str, List] = {}
+            for item in interface_items:
+                cat = item['category']
+                if cat not in by_category:
+                    by_category[cat] = []
+                by_category[cat].append(item)
+            
+            for category, items in by_category.items():
+                lines.append(f"<h4 style='color: #5cb85c;'>{category.upper()}</h4>")
+                lines.append("<table border='1' style='border-collapse: collapse; width: 100%; margin-bottom: 10px;'>")
+                lines.append("<tr style='background-color: #5cb85c; color: white;'>")
+                lines.append("<th style='padding: 6px;'>Interface</th>")
+                lines.append("<th style='padding: 6px;'>Present?</th>")
+                lines.append("<th style='padding: 6px;'>External?</th>")
+                lines.append("<th style='padding: 6px;'>Auth?</th>")
+                lines.append("</tr>")
+                
+                for i, item in enumerate(items):
+                    bg = '#f0fff0' if i % 2 else 'white'
+                    lines.append(f"<tr style='background-color: {bg};'>")
+                    lines.append(f"<td style='padding: 6px;'>☐ {item['interface']}<br><small>{item['description']}</small></td>")
+                    lines.append(f"<td style='padding: 6px; text-align: center;'>☐Y ☐N</td>")
+                    lines.append(f"<td style='padding: 6px; text-align: center;'>☐Y ☐N</td>")
+                    lines.append(f"<td style='padding: 6px; text-align: center;'>☐Y ☐N ☐N/A</td>")
+                    lines.append("</tr>")
+                
+                lines.append("</table>")
+        else:
+            lines.append("<p><em>Dynamic checklist not available - see PDF attachment.</em></p>")
+        
+        return lines
 
     def _count_critical_high_vulns(self) -> int:
         return len(
